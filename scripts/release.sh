@@ -123,9 +123,12 @@ bump_version() {
 
 set_version_in_csproj() {
   local newv=$1
-  # Replace first <Version>...</Version>
-  gsed -i '' -E "0,/<Version>.*<\/Version>/s//<Version>${newv}<\\/Version>/" "$CSProj" 2>/dev/null \
-    || sed -i '' -E "1,/<Version>.*<\/Version>/s//<Version>${newv}<\\/Version>/" "$CSProj"
+  # Replace <Version>...</Version> (all occurrences; typically only one exists)
+  if command -v gsed >/dev/null 2>&1; then
+    gsed -i '' -E "s#<Version>[^<]*</Version>#<Version>${newv}</Version>#g" "$CSProj"
+  else
+    sed -i '' -E "s#<Version>[^<]*</Version>#<Version>${newv}</Version>#g" "$CSProj"
+  fi
 }
 
 V_OLD=$(current_version)
@@ -185,32 +188,9 @@ PLUGIN_JSON=$(jq -n \
   --arg assemblyVersion "$V_NEW" \
   --arg download "$ASSET_URL" \
   --argjson tags "$TAGS" \
-  '{name:$name, internalName:$internalName, author:$author, punchline:$punchline, description:$description, repoUrl:$repoUrl, tags:$tags, assemblyVersion:$assemblyVersion, dalamudApiLevel:10, downloadLinkInstall:$download, downloadLinkUpdate:$download}')
+  '{Name:$name, InternalName:$internalName, Author:$author, Punchline:$punchline, Description:$description, RepoUrl:$repoUrl, Tags:$tags, AssemblyVersion:$assemblyVersion, ApplicableVersion:"any", DalamudApiLevel:13, DownloadLinkInstall:$download, DownloadLinkUpdate:$download}')
 
-# Default plugin dir to ../plugin if present and not provided
-if [[ -z "$PLUGIN_DIR" && -d "$ROOT_DIR/../plugin" ]]; then
-  PLUGIN_DIR="$ROOT_DIR/../plugin"
-fi
-
-# Optionally update plugin repo first
-if $PLUGIN_FIRST; then
-  update_repo_json
-fi
-
-if $DO_RELEASE; then
-  echo "Creating GitHub release ${TAG}..."
-  gh release create "$TAG" "$ZIP" \
-    --title "$RELEASE_TITLE" \
-    --notes "Automated release for $PROJECT_NAME $TAG"
-else
-  echo "[no-release] Skipping GitHub release creation. ASSET_URL will point to the would-be release URL: $ASSET_URL"
-fi
-
-# If we didn't update first, update now
-if ! $PLUGIN_FIRST; then
-  update_repo_json
-fi
-
+# Function: update or create repo.json (upsert by internalName) and optionally git commit/push
 update_repo_json() {
   # If a plugin directory is specified, target its repo.json by default
   if [[ -n "$PLUGIN_DIR" ]]; then
@@ -241,6 +221,7 @@ update_repo_json() {
       fi
     fi
 
+    TMP_OUT=$(mktemp)
     jq \
       --argjson plugin "$PLUGIN_JSON" \
       --arg internalName "$INTERNAL" \
@@ -252,12 +233,13 @@ update_repo_json() {
           else {version:(.version//1), plugins:[]}
           end;
         normalize
-        | .plugins = ([ .plugins[] | select(.internalName != $internalName) ] + [$plugin])
-      ' "$INPUT_JSON" > "$REPO_JSON_OUT"
+        | .plugins = ([ .plugins[] | select(.InternalName != $internalName) ] + [$plugin])
+      ' "$INPUT_JSON" > "$TMP_OUT" && mv "$TMP_OUT" "$REPO_JSON_OUT"
 
     [[ -n "$TMP_IN" ]] && rm -f "$TMP_IN"
   else
-    echo '{"version":1,"plugins":[]}' | jq --argjson plugin "$PLUGIN_JSON" '.plugins += [$plugin]' > "$REPO_JSON_OUT"
+    TMP_OUT=$(mktemp)
+    echo '{"version":1,"plugins":[]}' | jq --argjson plugin "$PLUGIN_JSON" '.plugins += [$plugin]' > "$TMP_OUT" && mv "$TMP_OUT" "$REPO_JSON_OUT"
   fi
 
   # Optionally commit/push in plugin repo
@@ -289,6 +271,30 @@ update_repo_json() {
     fi
   fi
 }
+
+# Default plugin dir to ../plugin if present and not provided
+if [[ -z "$PLUGIN_DIR" && -d "$ROOT_DIR/../plugin" ]]; then
+  PLUGIN_DIR="$ROOT_DIR/../plugin"
+fi
+
+# Optionally update plugin repo first
+if $PLUGIN_FIRST; then
+  update_repo_json
+fi
+
+if $DO_RELEASE; then
+  echo "Creating GitHub release ${TAG}..."
+  gh release create "$TAG" "$ZIP" \
+    --title "$RELEASE_TITLE" \
+    --notes "Automated release for $PROJECT_NAME $TAG"
+else
+  echo "[no-release] Skipping GitHub release creation. ASSET_URL will point to the would-be release URL: $ASSET_URL"
+fi
+
+# If we didn't update first, update now
+if ! $PLUGIN_FIRST; then
+  update_repo_json
+fi
 
 echo
 echo "Done. Artifacts:"
