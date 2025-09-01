@@ -1,11 +1,11 @@
-using System.Threading;
+using System;
 using AdaptiveFPS.Core.Game;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
 
 namespace AdaptiveFPS.Core;
 
-// Minimal on-demand cache to avoid hammering Dalamud services. Thread-safe, low overhead.
+// Cache game state once per framework tick to avoid hammering Dalamud services
 internal static class MicroCache
 {
     private static volatile bool _seeded;
@@ -13,39 +13,15 @@ internal static class MicroCache
     private static volatile bool _inCombat;
     private static volatile uint _currentCap;
     private static volatile uint _refreshHz;
-    private static long _stamp; // Monotonic change stamp; increments only when any value changes
+    private static Action? _onUpdate;
 
-    public static Snapshot Current
-    {
-        get
-        {
-            return new Snapshot(_loggedIn, _inCombat, _currentCap, _refreshHz);
-        }
-    }
+    public static Snapshot Current => new(_loggedIn, _inCombat, _currentCap, _refreshHz);
 
-    // Expose current stamp to allow callers to skip work if unchanged
-    public static long FrameStamp => Interlocked.Read(ref _stamp);
-
-    // Helper to fetch both snapshot and stamp in one call
-    public static long Get(out Snapshot snapshot)
-    {
-        // Read-consistent snapshot: read stamp, copy, re-check once.
-        var s1 = Interlocked.Read(ref _stamp);
-        snapshot = new Snapshot(_loggedIn, _inCombat, _currentCap, _refreshHz);
-        var s2 = Interlocked.Read(ref _stamp);
-        if (s1 != s2)
-        {
-            // One retry to reduce torn reads without spinning
-            snapshot = new Snapshot(_loggedIn, _inCombat, _currentCap, _refreshHz);
-            s1 = s2;
-        }
-        return s1;
-    }
-
-    public static void Initialize()
+    public static void Initialize(Action? onUpdate = null)
     {
         if (_seeded) return;
-        // Seed snapshot immediately
+        _onUpdate = onUpdate;
+        // Capture initial state
         CaptureNow();
         Plugin.Framework.Update += OnFrameworkUpdate;
         _seeded = true;
@@ -55,12 +31,15 @@ internal static class MicroCache
     {
         if (!_seeded) return;
         Plugin.Framework.Update -= OnFrameworkUpdate;
+        _onUpdate = null;
         _seeded = false;
     }
 
     private static void OnFrameworkUpdate(IFramework _)
     {
         CaptureNow();
+        // Trigger plugin logic every frame
+        _onUpdate?.Invoke();
     }
 
     private static void CaptureNow()
@@ -70,19 +49,15 @@ internal static class MicroCache
         var currentCap = FpsHelpers.GetCap();
         var refreshHz = FpsHelpers.GetRefreshRateHz();
 
-        bool changed = !_seeded
-            || loggedIn != _loggedIn
-            || inCombat != _inCombat
-            || currentCap != _currentCap
-            || refreshHz != _refreshHz;
-
-        if (changed)
+        // Only log combat state changes (most important for user feedback)
+        if (_seeded && inCombat != _inCombat)
         {
-            _loggedIn = loggedIn;
-            _inCombat = inCombat;
-            _currentCap = currentCap;
-            _refreshHz = refreshHz;
-            Interlocked.Increment(ref _stamp);
+            Plugin.Log.Information($"AdaptiveFPS: Combat {(inCombat ? "started" : "ended")}");
         }
+
+        _loggedIn = loggedIn;
+        _inCombat = inCombat;
+        _currentCap = currentCap;
+        _refreshHz = refreshHz;
     }
 }

@@ -10,7 +10,7 @@ internal static class Strings
 
     // Commands
     public const string CommandName = "/afps";
-    public const string CommandHelp = "AdaptiveFPS: /afps ic|ooc 1|2|3, /afps toggle";
+    public const string CommandHelp = "AdaptiveFPS: /afps ic|ooc 1|2|3, /afps toggle, /afps debug, /afps reset";
     public const string StatusFormat = "AdaptiveFPS: IC={0}, OOC={1}, Enabled={2}";
     public const string UsageIc = "Usage: /afps ic 1|2|3";
     public const string UsageOoc = "Usage: /afps ooc 1|2|3";

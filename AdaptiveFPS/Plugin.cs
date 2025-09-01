@@ -32,16 +32,12 @@ public sealed class Plugin : IDalamudPlugin
     {
         Config = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
-        Condition.ConditionChange += OnConditionChange;
-        ClientState.Login += OnLogin;
-        ClientState.Logout += OnLogout;
-
         // Register no-op UI callbacks to satisfy validator (no windows in this plugin)
         PluginInterface.UiBuilder.OpenConfigUi += OnOpenConfigUi;
         PluginInterface.UiBuilder.OpenMainUi += OnOpenMainUi;
 
-        // Start micro-cache updates on framework tick
-        MicroCache.Initialize();
+        // Start micro-cache - this handles framework tick and orchestrates everything
+        MicroCache.Initialize(ApplyAndRefresh);
         var initSnap = MicroCache.Current;
 
         _entry = DtrBar.Get(Strings.PluginName);
@@ -51,17 +47,10 @@ public sealed class Plugin : IDalamudPlugin
 
         // Register chat command handler
         _commands = new AfpsCommands(this);
-
-        // If already in game, apply now on framework thread
-        Framework.RunOnFrameworkThread(ApplyAndRefresh);
     }
 
     public void Dispose()
     {
-        Condition.ConditionChange -= OnConditionChange;
-        ClientState.Login -= OnLogin;
-        ClientState.Logout -= OnLogout;
-
         PluginInterface.UiBuilder.OpenConfigUi -= OnOpenConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= OnOpenMainUi;
 
@@ -79,23 +68,12 @@ public sealed class Plugin : IDalamudPlugin
             Save();
         }
 
-        // Stop micro-cache updates
+        // Stop micro-cache updates - this cleans up the framework handler
         MicroCache.Dispose();
     }
 
     private void OnOpenConfigUi() { /* noop: commands only */ }
     private void OnOpenMainUi() { /* noop: no main UI */ }
-
-    private void OnLogin() => Framework.RunOnFrameworkThread(ApplyAndRefresh);
-    private void OnLogout(int type, int code) { /* nothing for now */ }
-
-    private void OnConditionChange(ConditionFlag flag, bool value)
-    {
-        if (flag == ConditionFlag.InCombat)
-        {
-            Framework.RunOnFrameworkThread(ApplyAndRefresh);
-        }
-    }
 
     // Helper to apply current state and refresh DTR without lambda captures
     internal void ApplyAndRefresh() => Engine.ApplyAndRefresh(this, ref _isApplied, _entry);

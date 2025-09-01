@@ -17,20 +17,11 @@ internal readonly struct Snapshot(bool loggedIn, bool inCombat, uint currentCap,
 
 internal static class Engine
 {
-    // Tracks last UI state to skip redundant DTR updates (includes cache stamp + config)
-    private static long _lastUiStamp = -1;
-
     public static void ApplyAndRefresh(Plugin plugin, ref bool isApplied, IDtrBarEntry? entry)
     {
-        var stamp = MicroCache.Get(out var snap);
-        // Always apply in case config changed (stamp only reflects game state)
+        var snap = MicroCache.Current;
         ApplyForCurrentState(plugin, in snap, ref isApplied);
-        var uiStamp = ComputeUiStamp(plugin.Config, stamp);
-        if (uiStamp != _lastUiStamp)
-        {
-            RefreshStatus(plugin, entry, in snap);
-            _lastUiStamp = uiStamp;
-        }
+        RefreshStatus(plugin, entry, in snap);
     }
 
     public static void DisableAndRefresh(Plugin plugin, ref bool isApplied, IDtrBarEntry? entry)
@@ -40,13 +31,8 @@ internal static class Engine
             FpsHelpers.SetCap(plugin.Config.LastUserCap.Value);
             isApplied = false;
         }
-        var stamp = MicroCache.Get(out var snap);
-        var uiStamp = ComputeUiStamp(plugin.Config, stamp);
-        if (uiStamp != _lastUiStamp)
-        {
-            RefreshStatus(plugin, entry, in snap);
-            _lastUiStamp = uiStamp;
-        }
+        var snap = MicroCache.Current;
+        RefreshStatus(plugin, entry, in snap);
     }
 
     public static void OnEntryClick(Plugin plugin, DtrInteractionEvent e, ref bool isApplied, IDtrBarEntry? entry)
@@ -97,31 +83,19 @@ internal static class Engine
             return;
 
         var desired = snap.DesiredCap(plugin.Config);
-        var current = snap.CurrentCap;
 
+        // Save user's original setting on first application
         if (!isApplied)
         {
-            plugin.Config.LastUserCap = current;
+            plugin.Config.LastUserCap = snap.CurrentCap;
             isApplied = true;
             plugin.Save();
         }
 
-        if (current != desired)
+        // Only set if it's different from current to avoid spam
+        if (snap.CurrentCap != desired)
         {
-            Plugin.Log.Information($"{UI.Strings.PluginName}: {(snap.InCombat ? "combat" : "ooc")} -> cap {desired}");
             FpsHelpers.SetCap(desired);
-        }
-    }
-
-    private static long ComputeUiStamp(Configuration cfg, long frameStamp)
-    {
-        unchecked
-        {
-            long s = frameStamp;
-            s ^= ((long)cfg.CombatCap << 17);
-            s ^= ((long)cfg.OutOfCombatCap << 9);
-            if (cfg.Enabled) s ^= 0x1L;
-            return s;
         }
     }
 }
