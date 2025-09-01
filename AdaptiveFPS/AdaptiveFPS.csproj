@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project Sdk="Dalamud.NET.Sdk/12.0.2">
+<Project Sdk="Dalamud.NET.Sdk/13.1.0">
   <PropertyGroup>
-    <Version>0.1.0</Version>
+    <Version>0.0.0.1</Version>
     <Description>Adaptive framerate cap: 60 fps in combat, 30 fps out.</Description>
     <PackageProjectUrl>https://github.com/h1arc/adaptivefps</PackageProjectUrl>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
@@ -9,4 +9,29 @@
     <AssemblyName>AdaptiveFPS</AssemblyName>
     <RootNamespace>AdaptiveFPS</RootNamespace>
   </PropertyGroup>
+
+  <!-- No conditional defines; use full API in all configs -->
+
+  <!-- Debug-only: copy build outputs to XIV on Mac devPlugins folder -->
+  <Target Name="CopyPluginToXivOnMacDevPlugins" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
+    <!-- Destination: /Users/mario/Library/Application Support/XIV on Mac/devPlugins/AdaptiveFPS/ -->
+    <PropertyGroup>
+      <DevPluginsBase>/Users/mario/Library/Application Support/XIV on Mac/devPlugins</DevPluginsBase>
+      <PluginDir>$(DevPluginsBase)/AdaptiveFPS</PluginDir>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <!-- Built plugin DLL -->
+      <PluginFiles Include="$(TargetPath)" />
+      <!-- Manifest file -->
+      <PluginFiles Include="$(MSBuildProjectDirectory)/AdaptiveFPS.json" />
+      <!-- (Optional) PDB for easier debugging in local runs -->
+      <PluginFiles Include="$(TargetDir)$(AssemblyName).pdb" Condition="Exists('$(TargetDir)$(AssemblyName).pdb')" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(PluginDir)" />
+    <Copy SourceFiles="@(PluginFiles)" DestinationFolder="$(PluginDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- No local reference overrides; use SDK-provided references -->
 </Project>

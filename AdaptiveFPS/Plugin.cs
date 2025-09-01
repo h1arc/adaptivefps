@@ -1,61 +1,59 @@
-using System;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using Dalamud.Game;
 using Dalamud.Game.ClientState.Conditions;
-using FFXIVClientStructs.FFXIV.Client.System.Configuration;
-using System.Diagnostics;
+using Dalamud.Game.Gui.Dtr;
+using Dalamud.Game.Text.SeStringHandling;
+using AdaptiveFPS.Core.Commands;
+using AdaptiveFPS.Core.Game;
+using AdaptiveFPS.UI;
+using AdaptiveFPS.Core;
 
 namespace AdaptiveFPS;
 
-public sealed unsafe class Plugin : IDalamudPlugin
+public sealed class Plugin : IDalamudPlugin
 {
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
     [PluginService] internal static ICondition Condition { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
-    [PluginService] internal static IStatusBar StatusBar { get; private set; } = null!;
+    [PluginService] internal static IDtrBar DtrBar { get; private set; } = null!;
+    [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
+    [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
+    [PluginService] internal static IGameConfig GameConfig { get; private set; } = null!;
 
-    private Configuration Config { get; }
-    private bool _isApplied;
-    private IStatusBarEntry? _entry;
-    private readonly Stopwatch _fpsTimer = Stopwatch.StartNew();
-    private long _lastFrameTicks;
-    private double _emaFps = 60.0; // start at a sane default
+    internal Configuration Config { get; }
+    internal bool _isApplied;
+    private IDtrBarEntry? _entry;
+    private readonly AfpsCommands _commands;
 
     public Plugin()
     {
         Config = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
-        PluginInterface.UiBuilder.OpenConfigUi += Toggle; // reserved for future settings
 
         Condition.ConditionChange += OnConditionChange;
         ClientState.Login += OnLogin;
         ClientState.Logout += OnLogout;
-        Framework.Update += OnFrameworkUpdate;
 
-        // Create status bar entry
-        _entry = StatusBar.CreateEntry();
-        _entry.Text = BuildStatusText();
-        _entry.Tooltip = "AdaptiveFPS: Left-click to rotate OOC cap (Main/60/30). Right-click toggles plugin.";
-        _entry.OnClick = () =>
-        {
-            RotateOutOfCombatCap();
-            ApplyForCurrentState();
-            RefreshStatus();
-        };
-        _entry.OnRightClick = () =>
-        {
-            Config.Enabled = !Config.Enabled;
-            Save();
-            ApplyForCurrentState();
-            RefreshStatus();
-        };
-        StatusBar.AddEntry(_entry);
+        // Register no-op UI callbacks to satisfy validator (no windows in this plugin)
+        PluginInterface.UiBuilder.OpenConfigUi += OnOpenConfigUi;
+        PluginInterface.UiBuilder.OpenMainUi += OnOpenMainUi;
+
+        // Start micro-cache updates on framework tick
+        MicroCache.Initialize();
+        var initSnap = MicroCache.Current;
+
+        _entry = DtrBar.Get(Strings.PluginName);
+        _entry.Text = UI.UI.BuildStatus(Config, initSnap);
+        _entry.Tooltip = new SeStringBuilder().AddText(UI.UI.BuildTooltip(initSnap.RefreshHz)).Build();
+        _entry.OnClick = OnEntryClick;
+
+        // Register chat command handler
+        _commands = new AfpsCommands(this);
 
         // If already in game, apply now on framework thread
-        Framework.RunOnFrameworkThread(() => ApplyForCurrentState());
+        Framework.RunOnFrameworkThread(ApplyAndRefresh);
     }
 
     public void Dispose()
@@ -63,156 +61,49 @@ public sealed unsafe class Plugin : IDalamudPlugin
         Condition.ConditionChange -= OnConditionChange;
         ClientState.Login -= OnLogin;
         ClientState.Logout -= OnLogout;
-        Framework.Update -= OnFrameworkUpdate;
 
+        PluginInterface.UiBuilder.OpenConfigUi -= OnOpenConfigUi;
+        PluginInterface.UiBuilder.OpenMainUi -= OnOpenMainUi;
+
+        _commands.Dispose();
         if (_entry != null)
         {
-            StatusBar.RemoveEntry(_entry);
+            DtrBar.Remove(Strings.PluginName);
             _entry = null;
         }
 
-        // restore original cap if we changed it
         if (Config.LastUserCap.HasValue)
         {
-            SetCap(Config.LastUserCap.Value);
+            FpsHelpers.SetCap(Config.LastUserCap.Value);
             Config.LastUserCap = null;
             Save();
         }
+
+        // Stop micro-cache updates
+        MicroCache.Dispose();
     }
 
-    private void OnLogin() => Framework.RunOnFrameworkThread(ApplyForCurrentState);
-    private void OnLogout(int type, int code) { /* nothing */ }
+    private void OnOpenConfigUi() { /* noop: commands only */ }
+    private void OnOpenMainUi() { /* noop: no main UI */ }
+
+    private void OnLogin() => Framework.RunOnFrameworkThread(ApplyAndRefresh);
+    private void OnLogout(int type, int code) { /* nothing for now */ }
 
     private void OnConditionChange(ConditionFlag flag, bool value)
     {
         if (flag == ConditionFlag.InCombat)
         {
-            Framework.RunOnFrameworkThread(ApplyForCurrentState);
+            Framework.RunOnFrameworkThread(ApplyAndRefresh);
         }
     }
 
-    private void Toggle() { /* reserved for future on/off UI */ }
+    // Helper to apply current state and refresh DTR without lambda captures
+    internal void ApplyAndRefresh() => Engine.ApplyAndRefresh(this, ref _isApplied, _entry);
 
-    private void ApplyForCurrentState()
-    {
-        if (!Config.Enabled || !ClientState.IsLoggedIn)
-            return;
+    // Helper to restore original cap on disable and refresh DTR
+    internal void DisableAndRefresh() => Engine.DisableAndRefresh(this, ref _isApplied, _entry);
 
-        var inCombat = Condition[ConditionFlag.InCombat];
-        var desired = inCombat ? Config.CombatCap : Config.OutOfCombatCap;
+    private void OnEntryClick(DtrInteractionEvent e) => Engine.OnEntryClick(this, e, ref _isApplied, _entry);
 
-        // Capture original user cap once, before first change
-        if (!_isApplied)
-        {
-            var current = GetCap();
-            Config.LastUserCap = current;
-            _isApplied = true;
-            Save();
-        }
-
-        if (GetCap() != desired)
-        {
-            Log.Information($"AdaptiveFPS: {(inCombat ? "combat" : "ooc")} -> cap {desired}");
-            SetCap(desired);
-        }
-    }
-
-    private void RotateOutOfCombatCap()
-    {
-        // Cycle through: 1 (Main Display) -> 2 (60) -> 3 (30) -> 1 ...
-        uint next = Config.OutOfCombatCap switch
-        {
-            1u => 2u,
-            2u => 3u,
-            3u => 1u,
-            _ => 1u,
-        };
-        Config.OutOfCombatCap = next;
-        Save();
-    }
-
-    private void OnFrameworkUpdate(IFramework framework)
-    {
-        // FPS estimator using EMA for smooth status bar display
-        var now = _fpsTimer.ElapsedTicks;
-        if (_lastFrameTicks != 0)
-        {
-            var dtTicks = now - _lastFrameTicks;
-            if (dtTicks > 0)
-            {
-                var dt = (double)dtTicks / Stopwatch.Frequency;
-                var fps = 1.0 / dt;
-                const double alpha = 0.15; // smoothing factor
-                _emaFps = (_emaFps * (1 - alpha)) + (fps * alpha);
-            }
-        }
-        _lastFrameTicks = now;
-
-        // Update the status bar text at ~10Hz to reduce churn
-        _statusUpdateAccumulator += framework.UpdateDelta.TotalSeconds;
-        if (_statusUpdateAccumulator >= 0.1)
-        {
-            _statusUpdateAccumulator = 0;
-            RefreshStatus();
-        }
-    }
-
-    private double _statusUpdateAccumulator = 0;
-
-    private void RefreshStatus()
-    {
-        if (_entry == null) return;
-        _entry.Text = BuildStatusText();
-        _entry.Tooltip = BuildTooltip();
-    }
-
-    private string BuildStatusText()
-    {
-        var capLabel = Config.OutOfCombatCap switch
-        {
-            1u => "Main",
-            2u => "60",
-            3u => "30",
-            _ => Config.OutOfCombatCap.ToString(),
-        };
-
-        var mode = Config.Enabled ? "Adaptive" : "Manual";
-        return $"FPS {Math.Round(_emaFps, 1)} | OOC {capLabel} | {mode}";
-    }
-
-    private string BuildTooltip()
-    {
-        var inCombat = Condition[ConditionFlag.InCombat];
-        var currentCap = GetCap();
-        var currentLabel = currentCap switch
-        {
-            0u => "None",
-            1u => "Main Display",
-            2u => "60 fps",
-            3u => "30 fps",
-            _ => currentCap.ToString(),
-        };
-        var desired = inCombat ? Config.CombatCap : Config.OutOfCombatCap;
-        return $"Current cap: {currentLabel}\nDesired: {desired} ({(inCombat ? "combat" : "ooc")})\nLeft-click: cycle OOC cap\nRight-click: toggle Adaptive mode";
-    }
-
-    private static uint GetCap()
-    {
-        var cfg = ConfigModule.Instance();
-        if (cfg == null)
-            return 0u;
-        // SystemConfigOption.FramerateCap is 0x2D in current dawntrail; use enum if available
-        return cfg->GetUint(SystemConfigOption.FramerateCap);
-    }
-
-    private static void SetCap(uint value)
-    {
-        var cfg = ConfigModule.Instance();
-        if (cfg == null)
-            return;
-        cfg->Set(SystemConfigOption.FramerateCap, value);
-        cfg->SaveSystemConfig();
-    }
-
-    private void Save() => PluginInterface.SavePluginConfig(Config);
+    internal void Save() => PluginInterface.SavePluginConfig(Config);
 }
