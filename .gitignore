@@ -1,0 +1,13 @@
+# .NET / VS / Dalamud
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.cache
+*.ide/
+*.DS_Store
+# Rider
+.idea/
+# Logs
+*.log

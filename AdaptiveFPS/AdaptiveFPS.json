@@ -1,0 +1,9 @@
+{
+  "Author": "h1arc",
+  "Name": "AdaptiveFPS",
+  "Punchline": "Change FPS depending on combat state.",
+  "Description": "Automatically switches the game's System 'Frame Rate' cap between Main Display Framerate, 60, and 30 based on combat state.",
+  "ApplicableVersion": "any",
+  "Tags": ["fps", "framerate", "combat", "performance"],
+  "RepoUrl": "https://github.com/h1arc/adaptivefps"
+}
