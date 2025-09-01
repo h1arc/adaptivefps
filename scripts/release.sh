@@ -234,12 +234,13 @@ update_repo_json() {
           end;
         normalize
         | .plugins = ([ .plugins[] | select(.InternalName != $internalName) ] + [$plugin])
+        | .plugins
       ' "$INPUT_JSON" > "$TMP_OUT" && mv "$TMP_OUT" "$REPO_JSON_OUT"
 
     [[ -n "$TMP_IN" ]] && rm -f "$TMP_IN"
   else
     TMP_OUT=$(mktemp)
-    echo '{"version":1,"plugins":[]}' | jq --argjson plugin "$PLUGIN_JSON" '.plugins += [$plugin]' > "$TMP_OUT" && mv "$TMP_OUT" "$REPO_JSON_OUT"
+    echo '[]' | jq --argjson plugin "$PLUGIN_JSON" '. += [$plugin]' > "$TMP_OUT" && mv "$TMP_OUT" "$REPO_JSON_OUT"
   fi
 
   # Optionally commit/push in plugin repo
