@@ -81,6 +81,28 @@ internal sealed class AfpsCommands : IDisposable
                 _plugin.Save();
                 Plugin.ChatGui.Print("AdaptiveFPS: Reset to defaults - Combat: Main Display, OOC: 30fps");
                 break;
+            case "glow":
+                if (tokens.Length >= 2)
+                {
+                    if (tokens[1].Equals("toggle", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        _plugin.Config.GlowEnabled = !_plugin.Config.GlowEnabled;
+                        _plugin.Save();
+                        Plugin.ChatGui.Print(string.Format(Strings.GlowToggleFormat, _plugin.Config.GlowEnabled ? "enabled" : "disabled"));
+                    }
+                    else if (TryParseGlowNumber(tokens[1], out var glowType))
+                    {
+                        _plugin.Config.GlowType = glowType;
+                        _plugin.Save();
+                        Plugin.ChatGui.Print(string.Format(Strings.GlowSetFormat, glowType));
+                    }
+                    else
+                    {
+                        Plugin.ChatGui.Print(Strings.UsageGlow);
+                    }
+                }
+                else Plugin.ChatGui.Print(Strings.UsageGlow);
+                break;
             default:
                 Plugin.ChatGui.Print(Strings.UnknownCommand);
                 break;
@@ -95,6 +117,17 @@ internal sealed class AfpsCommands : IDisposable
             return true;
         }
         cap = 0;
+        return false;
+    }
+
+    private static bool TryParseGlowNumber(string token, out ushort glowType)
+    {
+        if (ushort.TryParse(token, out var n) && n >= 0 && n <= 5)
+        {
+            glowType = n;
+            return true;
+        }
+        glowType = 0;
         return false;
     }
 }

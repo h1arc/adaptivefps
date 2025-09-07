@@ -17,4 +17,8 @@ public class Configuration : IPluginConfiguration
 
     // Remember last user-set cap to restore on dispose if desired
     public uint? LastUserCap { get; set; }
+
+    // Glow settings
+    public bool GlowEnabled { get; set; } = true;
+    public ushort GlowType { get; set; } = 5; // Default glow type (0-5)
 }

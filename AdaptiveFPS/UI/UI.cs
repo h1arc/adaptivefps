@@ -10,14 +10,17 @@ internal static class Strings
 
     // Commands
     public const string CommandName = "/afps";
-    public const string CommandHelp = "AdaptiveFPS: /afps ic|ooc 1|2|3, /afps toggle, /afps debug, /afps reset";
+    public const string CommandHelp = "AdaptiveFPS: /afps ic|ooc 1|2|3, /afps toggle, /afps debug, /afps reset, /afps glow 0-5|toggle";
     public const string StatusFormat = "AdaptiveFPS: IC={0}, OOC={1}, Enabled={2}";
     public const string UsageIc = "Usage: /afps ic 1|2|3";
     public const string UsageOoc = "Usage: /afps ooc 1|2|3";
+    public const string UsageGlow = "Usage: /afps glow 0-5 or /afps glow toggle";
     public const string UnknownCommand = "AdaptiveFPS: Unknown command. Use /afps for help.";
     public const string EnabledFormat = "AdaptiveFPS: {0}"; // enabled/disabled
     public const string CombatSetFormat = "AdaptiveFPS: Combat cap set to {0}";
     public const string OocSetFormat = "AdaptiveFPS: OOC cap set to {0}";
+    public const string GlowSetFormat = "AdaptiveFPS: Glow type set to {0}";
+    public const string GlowToggleFormat = "AdaptiveFPS: Glow {0}"; // enabled/disabled
 
     // Tooltip
     public const string TooltipBase = "Left-click cycles in combat and right-click cycles out of combat framerate.";
@@ -45,7 +48,10 @@ internal static class UI
 
         if (snap.InCombat)
         {
-            sb.AddUiGlow(5).AddText(FpsHelpers.FormatCap(cfg.CombatCap, snap.RefreshHz)).AddUiGlowOff();
+            if (cfg.GlowEnabled)
+                sb.AddUiGlow(cfg.GlowType).AddText(FpsHelpers.FormatCap(cfg.CombatCap, snap.RefreshHz)).AddUiGlowOff();
+            else
+                sb.AddText(FpsHelpers.FormatCap(cfg.CombatCap, snap.RefreshHz));
         }
         else
         {
@@ -56,7 +62,10 @@ internal static class UI
 
         if (!snap.InCombat)
         {
-            sb.AddUiGlow(5).AddText(FpsHelpers.FormatCap(cfg.OutOfCombatCap, snap.RefreshHz)).AddUiGlowOff();
+            if (cfg.GlowEnabled)
+                sb.AddUiGlow(cfg.GlowType).AddText(FpsHelpers.FormatCap(cfg.OutOfCombatCap, snap.RefreshHz)).AddUiGlowOff();
+            else
+                sb.AddText(FpsHelpers.FormatCap(cfg.OutOfCombatCap, snap.RefreshHz));
         }
         else
         {
