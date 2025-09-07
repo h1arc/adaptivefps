@@ -14,3 +14,5 @@ obj/
 
 /lib
 /dist
+/release
+scripts/release.sh
